@@ -88,6 +88,11 @@ func (c *IDINClient) TransactionStatus(trxid string) (map[string]string, error) 
 		return nil, err
 	}
 
+	// Note, this does not work yet at the moment due to issues in the xmlenc
+	// library. You can use this line instead of validating the return message
+	// to work around the issue:
+	// WARNING: DO NOT DO THIS IN PRODUCTION! Fix the bug first!
+	//root := doc.Element
 	root, err := c.validateMessage(doc)
 	if err != nil {
 		return nil, err
