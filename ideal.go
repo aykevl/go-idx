@@ -18,8 +18,10 @@ type IDealTransaction struct {
 	transactionID           string
 }
 
-// The returned transaction status after a successful transaction.
+// The returned transaction status after a status request. Fields besides Status
+// are only set when Status equals Success.
 type IDealTransactionStatus struct {
+	Status       TransactionStatus
 	ConsumerName string // ConsumerName: the full name of one or even multiple consumers.
 	ConsumerIBAN string
 	ConsumerBIC  string
@@ -65,9 +67,8 @@ func (c *IDealClient) DirectoryRequest() (*Directory, error) {
 	return c.parseDirectoryRequest(response), nil
 }
 
-// Request the status of a transaction. Returns a TransactionError when the
-// status is not "Success", or a different error on problems during
-// signing/validation/http.
+// Request the status of a transaction. Returns an error on network/protocol
+// errors. Note that you must check the Status field manually.
 //
 // There are limits on how often you can call this function, see the
 // specification for details ("Collection duty").
@@ -88,18 +89,43 @@ func (c *IDealClient) TransactionStatus(trxid string) (*IDealTransactionStatus, 
 		return nil, errors.New("idx: returned transaction ID does not match")
 	}
 
-	status := response.FindElement("/Transaction/status").Text()
-	if status != "Success" {
-		return nil, &TransactionError{transactionID, status}
+	statusString := response.FindElement("/Transaction/status").Text()
+	var status TransactionStatus
+	switch statusString {
+	case "Success":
+		status = Success
+	case "Cancelled":
+		status = Cancelled
+	case "Expired":
+		status = Expired
+	case "Failure":
+		status = Failure
+	case "Open":
+		status = Open
+	default:
+		status = InvalidStatus
 	}
 
-	return &IDealTransactionStatus{
-		ConsumerName: response.FindElement("/Transaction/consumerName").Text(),
-		ConsumerIBAN: response.FindElement("/Transaction/consumerIBAN").Text(),
-		ConsumerBIC:  response.FindElement("/Transaction/consumerBIC").Text(),
-		Amount:       response.FindElement("/Transaction/amount").Text(),
-		Currency:     response.FindElement("/Transaction/currency").Text(),
-	}, nil
+	if status == InvalidStatus {
+		// Invalid status (not one of the statuses specified in the MIR).
+		return nil, errors.New("ideal: invalid status: " + statusString)
+	} else if status == Success {
+		// Valid response, transaction was successful.
+		return &IDealTransactionStatus{
+			Status:       status,
+			ConsumerName: response.FindElement("/Transaction/consumerName").Text(),
+			ConsumerIBAN: response.FindElement("/Transaction/consumerIBAN").Text(),
+			ConsumerBIC:  response.FindElement("/Transaction/consumerBIC").Text(),
+			Amount:       response.FindElement("/Transaction/amount").Text(),
+			Currency:     response.FindElement("/Transaction/currency").Text(),
+		}, nil
+	} else {
+		// Valid response, but status was not "Success".
+		return &IDealTransactionStatus{
+			Status: status,
+		}, nil
+	}
+
 }
 
 // Create a transaction object but do not start it.

@@ -34,6 +34,14 @@ type IDINTransaction struct {
 	transactionID           string
 }
 
+// IDINTransactionStatus is the result of doing a status request of an iDIN
+// transaction. The returned attributes are only present after a successful
+// transaction.
+type IDINTransactionStatus struct {
+	Status     TransactionStatus
+	Attributes map[string]string
+}
+
 func (c *IDINClient) createMessage(tag string) *etree.Element {
 	msg := c.CommonClient.createMessage(tag)
 	msg.CreateAttr("xmlns", "http://www.betaalvereniging.nl/iDx/messages/Merchant-Acquirer/1.0.0")
@@ -73,14 +81,15 @@ func (c *IDINClient) DirectoryRequest() (*Directory, error) {
 	return c.parseDirectoryRequest(response), nil
 }
 
-// Request the status of a transaction. Returns a TransactionError when the
-// status is not "Success", or a different error on problems during e.g.
-// signing/validation.
+// Request the status of a transaction. Returns an error on
+// network/protocol/signature errors. Note that when it does not return an
+// error, the status may still be something other than "Success", you will have
+// to handle each possible status.
 //
 // This call may only be done once upon redirection from the consumer bank. See
 // 11.5 "Restrictions on AcquirerStatusReq" in the iDIN specification for
 // details.
-func (c *IDINClient) TransactionStatus(trxid string) (map[string]string, error) {
+func (c *IDINClient) TransactionStatus(trxid string) (*IDINTransactionStatus, error) {
 	msg := c.createMessage("AcquirerStatusReq")
 	msg.CreateElement("Transaction").CreateElement("transactionID").SetText(trxid)
 	doc, err := c.request(c.signMessage(msg))
@@ -104,23 +113,40 @@ func (c *IDINClient) TransactionStatus(trxid string) (map[string]string, error) 
 	}
 
 	statusCodeEl := root.FindElement("/AcquirerStatusRes/Transaction/container/Response/Status/StatusCode")
-	status := statusCodeEl.SelectAttrValue("Value", "")
-	if status != "urn:oasis:names:tc:SAML:2.0:status:Success" {
-		return nil, &TransactionError{transactionID, status}
+	var status TransactionStatus
+	statusString := statusCodeEl.SelectAttrValue("Value", "")
+	// WARNING: untested status strings.
+	switch statusString {
+	case "urn:oasis:names:tc:SAML:2.0:status:Success":
+		status = Success
+	case "urn:oasis:names:tc:SAML:2.0:status:Cancelled":
+		status = Cancelled
+	case "urn:oasis:names:tc:SAML:2.0:status:Expired":
+		status = Expired
+	case "urn:oasis:names:tc:SAML:2.0:status:Failure":
+		status = Failure
+	case "urn:oasis:names:tc:SAML:2.0:status:Open":
+		status = Open
+	default:
+		return nil, errors.New("idin: invalid status: " + statusString)
 	}
 
-	attributes := make(map[string]string)
-	for _, el := range root.FindElements("/AcquirerStatusRes/Transaction/container/Response/Assertion/AttributeStatement/EncryptedAttribute/EncryptedData") {
-		el, err := xmlenc.DecryptElement(el, c.Certificate.PrivateKey.(*rsa.PrivateKey))
-		if err != nil {
-			return nil, err
+	result := &IDINTransactionStatus{
+		Status: status,
+	}
+	if status == Success {
+		result.Attributes = make(map[string]string)
+		for _, el := range root.FindElements("/AcquirerStatusRes/Transaction/container/Response/Assertion/AttributeStatement/EncryptedAttribute/EncryptedData") {
+			el, err := xmlenc.DecryptElement(el, c.Certificate.PrivateKey.(*rsa.PrivateKey))
+			if err != nil {
+				return nil, err
+			}
+			key := el.FindElement("Attribute").SelectAttrValue("Name", "")
+			value := el.FindElement("Attribute/AttributeValue").Text()
+			result.Attributes[key] = value
 		}
-		key := el.FindElement("Attribute").SelectAttrValue("Name", "")
-		value := el.FindElement("Attribute/AttributeValue").Text()
-		attributes[key] = value
 	}
-
-	return attributes, nil
+	return result, nil
 }
 
 // Create a transaction object but do not start it.

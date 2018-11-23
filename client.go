@@ -30,17 +30,35 @@ import (
 	"github.com/russellhaering/goxmldsig"
 )
 
-// A TransactionError is returned by the TransactionStatus functions when the
-// status is anything besides "Success".
-type TransactionError struct {
-	TransactionID string
-	Status        string
-}
+type TransactionStatus int
 
-// Error returns a human-readable string with the error status and transaction
-// ID.
-func (e TransactionError) Error() string {
-	return "idx: status " + e.Status + " for transaction " + e.TransactionID + " is not Success"
+// TransactionStatus is an enum of the possible statuses of an iDeal/iDIN
+// transaction.
+const (
+	InvalidStatus TransactionStatus = iota
+	Success
+	Cancelled
+	Expired
+	Failure
+	Open
+)
+
+func (status TransactionStatus) String() string {
+	switch status {
+	case Success:
+		return "Success"
+	case Cancelled:
+		return "Cancelled"
+	case Expired:
+		return "Expired"
+	case Failure:
+		return "Failure"
+	case Open:
+		return "Open"
+	default:
+		// Not returned in the iDeal/iDIN protocol.
+		return "InvalidStatus"
+	}
 }
 
 // AcquirerError may be returned by any API call to an iDeal/iDIN server.
