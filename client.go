@@ -175,8 +175,8 @@ func (c *CommonClient) parseDirectoryRequest(msg *etree.Element) *Directory {
 		Issuers: make(map[string][]Issuer),
 	}
 	for _, countryEl := range msg.FindElements("/Directory/Country") {
-		countryName := countryEl.FindElement("/Directory/Country/countryNames").Text()
-		for _, issuerEl := range countryEl.FindElements("/Directory/Country/Issuer") {
+		countryName := countryEl.FindElement("countryNames").Text()
+		for _, issuerEl := range countryEl.FindElements("Issuer") {
 			issuerID := issuerEl.FindElement("issuerID").Text()
 			issuerName := issuerEl.FindElement("issuerName").Text()
 			directory.Issuers[countryName] = append(directory.Issuers[countryName], Issuer{issuerID, issuerName})
